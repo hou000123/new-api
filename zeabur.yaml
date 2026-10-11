@@ -1,0 +1,152 @@
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: new-api
+spec:
+  description: New‑API，LLM API 转发管理服务
+  icon: https://raw.githubusercontent.com/calciumion/new-api/main/web/public/logo.png
+  tags:
+    - API
+    - LLM
+    - Proxy
+  variables:
+    - key: PUBLIC_DOMAIN
+      type: DOMAIN
+      name: 访问域名
+      description: New‑API 对外访问域名
+  readme: |-
+    # New‑API
+    开源大模型API转发与密钥管理系统。
+
+    ## 部署说明
+    1. 填写对外访问域名
+    2. 等待服务启动完成，使用域名访问面板
+    3. 所有数据库、Redis密码由Zeabur自动生成，可在服务变量页面查看
+
+    > ⚠️ 生产环境请保管自动生成的密码。
+
+  services:
+    - name: redis
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/redis.svg
+      template: PREBUILT
+      spec:
+        source:
+          image: redis:latest
+        ports:
+          - id: redis-tcp
+            port: 6379
+            type: TCP
+        volumes:
+          - id: redis-data
+            dir: /data
+        env:
+          REDIS_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+            readonly: true
+          REDIS_ARGS:
+            default: --requirepass ${REDIS_PASSWORD}
+          REDIS_CONN_STRING:
+            default: redis://:${REDIS_PASSWORD}@${CONTAINER_HOSTNAME}:6379
+            expose: true
+            readonly: true
+        instructions:
+          - type: PASSWORD
+            title: Redis 密码
+            content: ${REDIS_PASSWORD}
+            category: Credentials
+          - type: TEXT
+            title: Redis连接字符串
+            content: ${REDIS_CONN_STRING}
+            category: Credentials
+
+    - name: postgres
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/postgresql.svg
+      template: PREBUILT
+      spec:
+        source:
+          image: postgres:15
+        ports:
+          - id: pg-tcp
+            port: 5432
+            type: TCP
+        volumes:
+          - id: pg_data
+            dir: /var/lib/postgresql/data
+        env:
+          POSTGRES_USER:
+            default: root
+            expose: true
+            readonly: true
+          POSTGRES_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+            readonly: true
+          POSTGRES_DB:
+            default: new-api
+            expose: true
+            readonly: true
+          POSTGRES_DSN:
+            default: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${CONTAINER_HOSTNAME}:5432/${POSTGRES_DB}
+            expose: true
+            readonly: true
+        instructions:
+          - type: PASSWORD
+            title: PostgreSQL密码
+            content: ${POSTGRES_PASSWORD}
+            category: Credentials
+          - type: TEXT
+            title: PostgreSQL DSN连接串
+            content: ${POSTGRES_DSN}
+            category: Credentials
+
+    - name: new-api
+      icon: https://raw.githubusercontent.com/calciumion/new-api/main/web/public/logo.png
+      template: PREBUILT
+      dependencies:
+        - redis
+        - postgres
+      domainKey: PUBLIC_DOMAIN
+      spec:
+        source:
+          image: calciumion/new-api:latest
+        command:
+          - --log-dir
+          - /app/logs
+        ports:
+          - id: web
+            port: 3000
+            type: HTTP
+        volumes:
+          - id: newapi-data
+            dir: /data
+          - id: newapi-logs
+            dir: /app/logs
+        env:
+          SQL_DSN:
+            default: ${POSTGRES_DSN}
+          REDIS_CONN_STRING:
+            default: ${REDIS_CONN_STRING}
+          TZ:
+            default: Asia/Shanghai
+          ERROR_LOG_ENABLED:
+            default: "true"
+          BATCH_UPDATE_ENABLED:
+            default: "true"
+          NODE_NAME:
+            default: new-api-node-1
+#          DEFAULT_LANGUAGE:
+#            default: zh-CN
+#          STREAMING_TIMEOUT:
+#            default: "300"
+#          SESSION_SECRET:
+#            default: ""
+        healthcheck:
+          test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+        instructions:
+          - type: DOMAIN
+            title: 访问New‑API面板
+            content: ${PUBLIC_DOMAIN}
